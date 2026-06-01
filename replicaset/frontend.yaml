@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: frontend
+  labels:
+    app: guestbook
+    tier: frontend
+spec:
+  # 按你的实际情况修改副本数
+  replicas: 10
+  selector:
+    matchLabels:
+      tier: frontend
+  template:
+    metadata:
+      labels:
+        tier: frontend
+    spec:
+      containers:
+      - name: php-redis
+        image: us-docker.pkg.dev/google-samples/containers/gke/gb-frontend:v5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    tier: frontend
+  name: frontend-svc
+spec:
+  ports:
+  - name: frontend-svc
+    # svc端口
+    port: 80
+    protocol: TCP
+    # 容器端口
+    targetPort: 80
+  selector:
+    tier: frontend
+  type: NodePort
