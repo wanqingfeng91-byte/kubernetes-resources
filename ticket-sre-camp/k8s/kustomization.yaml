@@ -1,0 +1,31 @@
+# Kustomize 配置 — 管理所有 K8s 资源
+# 部署命令: kubectl apply -k ./k8s
+# 预览命令: kubectl kustomize ./k8s
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ticket-sre
+
+# ── 公共标签 ──────────────────────────────────────
+commonLabels:
+  project: ticket-sre-camp
+  managed-by: kustomize
+
+# ── 资源列表 (按部署顺序) ─────────────────────────
+resources:
+  - 00-namespace.yaml
+  - 01-configmap.yaml
+  - 02-ticket-api-deployment.yaml
+  - 03-ticket-api-svc.yaml
+  - 04-ticket-db-statefulset.yaml
+  - 05-ticket-db-svc.yaml
+  - 06-ticket-init-job.yaml
+  - 07-ticket-settle-cronjob.yaml
+
+# ── 镜像替换 (可在此处统一修改镜像版本) ────────────
+# images:
+#   - name: ticket-sre/ticket-api-go
+#     newTag: v1.2.0
+#   - name: ticket-sre/ticket-db-go
+#     newTag: v1.2.0

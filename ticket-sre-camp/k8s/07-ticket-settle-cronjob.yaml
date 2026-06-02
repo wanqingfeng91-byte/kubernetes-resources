@@ -1,0 +1,119 @@
+# ════════════════════════════════════════════════════════════
+# 步骤三·B：每日财务对账 — CronJob
+# ════════════════════════════════════════════════════════════
+# 学到的知识点：
+#   1. CronJob 在指定时间自动创建 Job
+#   2. schedule 使用 Cron 表达式 (5 段式：分 时 日 月 周)
+#   3. concurrencyPolicy 控制并发策略
+#   4. successfulJobsHistoryLimit / failedJobsHistoryLimit
+#      控制保留的已完成 Job 数量
+#   5. startingDeadlineSeconds: 错过调度时间的容忍窗口
+#   6. suspend: 可以暂停 CronJob (紧急情况下使用)
+# ════════════════════════════════════════════════════════════
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ticket-settle
+  namespace: ticket-sre
+  labels:
+    app: ticket-settle
+    component: cronjob-settle
+  annotations:
+    description: "每日凌晨2:00自动执行抢票财务对账与报表导出"
+
+spec:
+  # ═════════════════════════════════════════════════
+  # Cron 调度表达式
+  # ═════════════════════════════════════════════════
+  # ┌────────── 分钟 (0-59)
+  # │ ┌────────── 小时 (0-23)
+  # │ │ ┌────────── 日 (1-31)
+  # │ │ │ ┌────────── 月 (1-12)
+  # │ │ │ │ ┌────────── 星期 (0-6, 0=周日)
+  # │ │ │ │ │
+  # 0 2 * * *   ← 每天凌晨 2:00 执行
+  #
+  # 常用示例：
+  #   "*/5 * * * *"  每5分钟
+  #   "0 * * * *"    每小时整点
+  #   "0 9 * * 1-5"  工作日早上9点
+  #   "0 0 1 * *"    每月1号凌晨
+  #   "0 2 * * *"    每天凌晨2点
+  # ═════════════════════════════════════════════════
+  schedule: "0 2 * * *"
+
+  # ── 时区 (K8s 1.27+) ────────────────────────────
+  timeZone: "Asia/Shanghai"
+
+  # ═════════════════════════════════════════════════
+  # 并发策略 (concurrencyPolicy)
+  # ═════════════════════════════════════════════════
+  # Allow: 允许并发执行 (默认)
+  #        如果上次 Job 还没跑完，新 Job 仍然启动
+  #        ⚠️ 风险：上次对账还没完成，新的又开始了
+  # Forbid: 禁止并发
+  #         如果上次 Job 还在跑，跳过本次调度
+  #         ✅ 财务对账必须用这个！防止重复计算
+  # Replace: 替换
+  #          如果上次 Job 还在跑，取消它并启动新的
+  # ═════════════════════════════════════════════════
+  concurrencyPolicy: Forbid
+
+  # ── 错过调度的容忍窗口 ──────────────────────────
+  # 如果 CronJob 因为某种原因 (如集群维护) 在 2:00
+  # 无法执行，在此窗口内 (300秒) 仍然可以补执行。
+  # 超过这个时间就跳过。
+  startingDeadlineSeconds: 300
+
+  # ── 暂停 CronJob ────────────────────────────────
+  # 紧急情况 (如数据库故障) 可以设为 true 暂停
+  suspend: false
+
+  # ── 保留历史记录数量 ────────────────────────────
+  # 审计要求保留最近 5 次成功的记录
+  successfulJobsHistoryLimit: 5
+  # 只保留最近 1 条失败的以便排查
+  failedJobsHistoryLimit: 1
+
+  jobTemplate:
+    spec:
+      # ── Job 配置 ──────────────────────────────────
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 86400  # 24小时后自动清理
+
+      template:
+        metadata:
+          labels:
+            app: ticket-settle
+        spec:
+          restartPolicy: OnFailure
+
+          containers:
+          - name: ticket-settle
+            image: ticket-sre/ticket-settle-go:latest
+            imagePullPolicy: IfNotPresent
+
+            envFrom:
+            - configMapRef:
+                name: ticket-config
+
+            env:
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: CRON_SCHEDULE
+              value: "0 2 * * *"
+            - name: RUN_DATE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.creationTimestamp
+
+            resources:
+              requests:
+                cpu: "200m"
+                memory: "256Mi"
+              limits:
+                cpu: "500m"
+                memory: "512Mi"

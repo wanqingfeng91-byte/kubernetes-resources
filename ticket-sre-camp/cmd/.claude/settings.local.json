@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem *)",
+      "Bash(mkdir -p \"C:\\\\Users\\\\17777\\\\Desktop\\\\kubernetes-resources\\\\ticket-sre-camp\\\\java\\\\ticket-api\\\\src\\\\main\\\\java\\\\com\\\\ticket\\\\api\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\17777\\\\Desktop\\\\kubernetes-resources\\\\ticket-sre-camp\\\\java\\\\ticket-api\\\\src\\\\main\\\\resources\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\17777\\\\Desktop\\\\kubernetes-resources\\\\ticket-sre-camp\\\\java\\\\ticket-db\\\\src\\\\main\\\\java\\\\com\\\\ticket\\\\db\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\17777\\\\Desktop\\\\kubernetes-resources\\\\ticket-sre-camp\\\\java\\\\ticket-db\\\\src\\\\main\\\\resources\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\17777\\\\Desktop\\\\kubernetes-resources\\\\ticket-sre-camp\\\\java\\\\ticket-init\\\\src\\\\main\\\\java\\\\com\\\\ticket\\\\init\")"
+    ]
+  }
+}

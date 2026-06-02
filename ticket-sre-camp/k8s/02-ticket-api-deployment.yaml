@@ -1,0 +1,160 @@
+# ════════════════════════════════════════════════════════════
+# 步骤一：部署抢票 API — Deployment
+# ════════════════════════════════════════════════════════════
+# 学到的知识点：
+#   1. startupProbe  — 保护慢启动应用，防止被 livenessProbe 误杀
+#   2. livenessProbe — 检测死锁，自动重启故障 Pod
+#   3. readinessProbe — 控制流量接入，摘除异常 Pod
+#   4. lifecycle.preStop — 优雅下线，等待在途请求处理完毕
+#   5. terminationGracePeriodSeconds — 优雅下线总超时
+#   6. 滚动更新策略 (RollingUpdate) — 逐步替换旧 Pod
+# ════════════════════════════════════════════════════════════
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ticket-api
+  namespace: ticket-sre
+  labels:
+    app: ticket-api
+    component: api-gateway
+    version: v1
+spec:
+  # ── 滚动更新策略 ────────────────────────────────
+  # Recreate: 先全删再全建 (有停机时间)
+  # RollingUpdate: 逐个替换 (推荐，零停机)
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1    # 最多允许 1 个 Pod 不可用
+      maxSurge: 1          # 允许超出副本数 1 个 Pod
+
+  # 因为要等待 30s 预热，这里给足时间
+  minReadySeconds: 10
+
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ticket-api
+
+  template:
+    metadata:
+      labels:
+        app: ticket-api
+        version: v1
+      annotations:
+        # Prometheus 监控抓取配置
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+
+    spec:
+      # ── 优雅下线总超时 ──────────────────────────
+      # preStop (15s) + 应用处理时间 (15s) = 30s
+      terminationGracePeriodSeconds: 30
+
+      containers:
+      - name: ticket-api
+        image: ticket-sre/ticket-api-go:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+
+        # ── 环境变量 (来自 ConfigMap) ───────────────
+        envFrom:
+        - configMapRef:
+            name: ticket-config
+
+        # ═════════════════════════════════════════════
+        # Startup Probe (启动探针)
+        # ═════════════════════════════════════════════
+        # 作用：等待应用完成初始化。成功之前，liveness 和 readiness 探针不会被调用。
+        # 为什么需要：我们的服务需要 30 秒加载 1GB 场馆数据。
+        #           如果没有 startupProbe，livenessProbe 在 30 秒内探测失败
+        #           就会误判 Pod 不健康并重启，导致永远启动不了。
+        # ═════════════════════════════════════════════
+        startupProbe:
+          httpGet:
+            path: /startup
+            port: 8080
+          initialDelaySeconds: 0       # 启动后立即开始探测
+          periodSeconds: 5             # 每 5 秒探测一次
+          failureThreshold: 12         # 允许失败 12 次 (60秒总窗口)
+          successThreshold: 1          # 成功 1 次即通过
+          timeoutSeconds: 3
+
+        # ═════════════════════════════════════════════
+        # Liveness Probe (存活探针)
+        # ═════════════════════════════════════════════
+        # 作用：检测应用是否还"活着"。
+        #       如果应用死锁了 (进程还在但无法处理请求)，
+        #       /healthz 返回 503，K8s 会杀掉 Pod 并重建。
+        # 为什么需要：抢票系统高并发下可能出现死锁。
+        #           多线程竞争锁资源，所有 goroutine 卡住，
+        #           进程还活着但无法响应任何请求。
+        #           通过 livenessProbe 自动检测并重启。
+        # ═════════════════════════════════════════════
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          periodSeconds: 10            # 每 10 秒探测一次
+          failureThreshold: 3          # 连续失败 3 次 (30秒) 后重启
+          successThreshold: 1
+          timeoutSeconds: 3
+
+        # ═════════════════════════════════════════════
+        # Readiness Probe (就绪探针)
+        # ═════════════════════════════════════════════
+        # 作用：检测应用是否可以接收流量。
+        #       返回非 200 时，Service 的 Endpoints 中移除此 Pod IP，
+        #       不再将新请求转发过来。
+        # 为什么需要：服务可能因为依赖不可用 (数据库、Redis)
+        #           而无法正常服务请求。readinessProbe 自动摘除故障 Pod，
+        #           恢复后自动加回。
+        # ═════════════════════════════════════════════
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          periodSeconds: 5             # 每 5 秒探测
+          failureThreshold: 3          # 连续失败 3 次 (15秒) 后摘除
+          successThreshold: 1          # 成功 1 次即恢复
+          timeoutSeconds: 3
+
+        # ═════════════════════════════════════════════
+        # Lifecycle Hooks (生命周期钩子)
+        # ═════════════════════════════════════════════
+        # preStop: Pod 被删除时，先执行此钩子，然后再发送 SIGTERM。
+        #          这给了我们一个"排水窗口"来安全处理完在途请求。
+        # postStart: 容器创建后立即执行 (本例不需要)
+        # ═════════════════════════════════════════════
+        lifecycle:
+          preStop:
+            exec:
+              # 策略：
+              # 1. 调用 /simulate-notready 让 readinessProbe 立即失败
+              # 2. K8s 在下一个探测周期 (最多 5s) 内摘除本 Pod 流量
+              # 3. 再 sleep 15s 等待所有在途请求处理完毕
+              # 4. 然后 K8s 才发送 SIGTERM 信号给应用
+              command:
+              - /bin/sh
+              - -c
+              - |
+                echo "[preStop] 🔄 开始优雅下线..."
+                echo "[preStop] 📤 通知 K8s: 本 Pod 不再接收新流量"
+                curl -s -X POST http://localhost:8080/simulate-notready || true
+                echo "[preStop] ⏳ 等待 15 秒处理在途请求..."
+                sleep 15
+                echo "[preStop] ✅ preStop 完成，K8s 即将发送 SIGTERM"
+
+        # ── 资源限制 ────────────────────────────────
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "1000m"
+            memory: "512Mi"

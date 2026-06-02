@@ -1,0 +1,155 @@
+# ════════════════════════════════════════════════════════════
+# 步骤二：部署抢票主数据库 — StatefulSet
+# ════════════════════════════════════════════════════════════
+# 学到的知识点：
+#   1. 稳定网络标识：Pod 名固定为 {statefulset-name}-{0..N-1}
+#      ticket-db-0 (主库), ticket-db-1 (从库)
+#      即使 Pod 被删除重建，名称不变
+#   2. 稳定存储：通过 volumeClaimTemplates 为每个 Pod 创建
+#      独立的 PVC。Pod 重启/迁移到其他节点，PVC 会跟随绑定
+#   3. 有序部署：按序号 0→1→2 顺序创建，前一个 Ready 后才启动下一个
+#   4. 有序缩容：逆序 2→1→0 删除
+#   5. Headless Service：配合 StatefulSet，DNS 为每个 Pod
+#      创建独立的 A 记录
+# ════════════════════════════════════════════════════════════
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ticket-db
+  namespace: ticket-sre
+  labels:
+    app: ticket-db
+    component: database
+spec:
+  # ── 关键：serviceName 必须指定 ──────────────────
+  # 指向 Headless Service，为每个 Pod 创建独立 DNS 记录
+  # ticket-db-0.ticket-db-svc.ticket-sre.svc.cluster.local
+  # ticket-db-1.ticket-db-svc.ticket-sre.svc.cluster.local
+  serviceName: ticket-db-svc
+
+  replicas: 2
+
+  # ── Pod 管理策略 ────────────────────────────────
+  # OrderedReady: 严格按序号顺序，前一个 Ready 后才启动下一个 (默认，数据库必须)
+  # Parallel: 所有 Pod 同时启动 (适合无状态或自带选举的中间件)
+  podManagementPolicy: OrderedReady
+
+  # ── 分区更新 (可用于金丝雀发布) ──────────────────
+  # partition: 0 表示更新所有 Pod
+  # 设置为 1 表示只更新序号 >= 1 的 Pod，0 号主库不动
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+
+  # ── 选择器 ──────────────────────────────────────
+  selector:
+    matchLabels:
+      app: ticket-db
+
+  template:
+    metadata:
+      labels:
+        app: ticket-db
+    spec:
+      # 数据库需要更长的优雅退出时间
+      terminationGracePeriodSeconds: 30
+
+      containers:
+      - name: ticket-db
+        image: ticket-sre/ticket-db-go:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8081
+          name: http
+          protocol: TCP
+
+        envFrom:
+        - configMapRef:
+            name: ticket-config
+
+        env:
+        # ── 关键：注入 Pod 身份信息 ──────────────────
+        # HOSTNAME 在 StatefulSet 中是固定的 ticket-db-0 / ticket-db-1
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        # 应用根据 HOSTNAME 解析自己的序号和角色
+        # ticket-db-0 → ordinal=0 → master
+        # ticket-db-1 → ordinal=1 → slave
+
+        # PVC 挂载到 /data 目录
+        volumeMounts:
+        - name: data
+          mountPath: /data/ticket-db
+
+        # ── 探针配置 ────────────────────────────────
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          periodSeconds: 5
+          failureThreshold: 6
+          timeoutSeconds: 3
+
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          periodSeconds: 10
+          failureThreshold: 3
+          timeoutSeconds: 3
+
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8081
+          periodSeconds: 5
+          failureThreshold: 3
+          timeoutSeconds: 3
+
+        # ── 数据库写操作需要确保已 fsync 到磁盘 ────
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - /bin/sh
+              - -c
+              - |
+                echo "[preStop] 🗄️ 数据库安全关闭..."
+                echo "[preStop] 📝 正在 fsync 刷盘，确保数据不丢失..."
+                curl -s -X POST http://localhost:8081/ready || true
+                sleep 5
+                echo "[preStop] ✅ 数据已安全落盘 (PVC)"
+
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+
+  # ═════════════════════════════════════════════════
+  # VolumeClaimTemplates
+  # ═════════════════════════════════════════════════
+  # 每个 Pod 自动创建独立的 PVC：
+  #   data-ticket-db-0 → 绑定到 ticket-db-0
+  #   data-ticket-db-1 → 绑定到 ticket-db-1
+  # Pod 被删除后 PVC 仍然保留 (数据不丢)
+  # Pod 在其他 Node 重建后，同一个 PVC 重新挂载
+  # ═════════════════════════════════════════════════
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+      labels:
+        app: ticket-db
+    spec:
+      accessModes:
+      - ReadWriteOnce           # 单节点读写 (RWO)
+      storageClassName: standard # 使用默认 StorageClass
+      resources:
+        requests:
+          storage: 1Gi

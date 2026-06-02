@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ticket-config
+  namespace: ticket-sre
+data:
+  # ── 数据库连接配置 ──────────────────────────────
+  DB_MASTER_HOST: "ticket-db-0.ticket-db-svc.ticket-sre.svc.cluster.local"
+  DB_SLAVE_HOST:  "ticket-db-1.ticket-db-svc.ticket-sre.svc.cluster.local"
+  DB_PORT:        "8081"
+  DB_NAME:        "ticket_sre"
+
+  # ── Redis 连接配置 ───────────────────────────────
+  REDIS_HOST: "ticket-redis-svc"
+  REDIS_PORT: "6379"
+
+  # ── 业务配置 ────────────────────────────────────
+  APP_NAME:            "天王演唱会抢票系统"
+  MAX_CONCURRENT_BUY:  "1000"
+  VENUE_DATA_SIZE_MB:  "1024"
+  ORDER_TIMEOUT_SEC:   "30"
+
+  # ── 财务配置 ────────────────────────────────────
+  REPORT_EMAIL:  "finance@ticket-sre.com"
+  REPORT_CC:     "ops@ticket-sre.com"
+  WECHAT_BILL_API:  "https://api.weixin.qq.com/v3/bill"
+  ALIPAY_BILL_API:  "https://openapi.alipay.com/v3/bill"

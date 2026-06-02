@@ -1,0 +1,24 @@
+# ============================================================
+# Stage 1: Build Go binary
+# ============================================================
+FROM golang:1.25-alpine AS builder
+
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download 2>/dev/null || true
+COPY main.go .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /ticket-settle .
+
+# ============================================================
+# Stage 2: 最小运行时镜像 (CronJob 任务，定时执行)
+# ============================================================
+FROM alpine:3.21
+
+RUN apk add --no-cache ca-certificates tzdata && \
+    cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+    echo "Asia/Shanghai" > /etc/timezone
+
+WORKDIR /app
+COPY --from=builder /ticket-settle .
+
+ENTRYPOINT ["./ticket-settle"]

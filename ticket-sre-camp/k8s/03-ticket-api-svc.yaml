@@ -1,0 +1,22 @@
+# ── 抢票 API Service ─────────────────────────────────
+# ClusterIP 类型：集群内部访问
+# Service 根据 readinessProbe 的结果动态管理 Endpoints
+# 只有 Ready 的 Pod 才会被加入负载均衡
+apiVersion: v1
+kind: Service
+metadata:
+  name: ticket-api-svc
+  namespace: ticket-sre
+  labels:
+    app: ticket-api
+spec:
+  type: ClusterIP
+  selector:
+    app: ticket-api
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  # SessionAffinity: 如需会话保持可开启
+  # sessionAffinity: ClientIP
