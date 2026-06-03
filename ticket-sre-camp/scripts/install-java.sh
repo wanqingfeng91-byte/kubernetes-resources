@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
 # ============================================================
-# install-java.sh — 在 Ubuntu 上安装 Java 25 + Maven
+# install-java.sh — 在 Ubuntu 上安装 Java JDK + Maven
+#
+# 用途：通过 Eclipse Temurin (Adoptium) APT 仓库安装指定版本 JDK
+#       下载并安装 Apache Maven 到 /opt，配置 MAVEN_HOME 环境变量
+#       可选安装 Gradle（交互式确认）
+#
 # 适用：Ubuntu 20.04 / 22.04 / 24.04
 # 网络：海外直连，无需代理
 # JDK：Eclipse Temurin (Adoptium) — 最广泛使用的 OpenJDK 发行版
+#
+# 用法：
+#   bash scripts/install-java.sh                   # 安装默认版本
+#   JAVA_VERSION=21 MAVEN_VERSION=3.9.9 bash scripts/install-java.sh
+#   NONINTERACTIVE=1 bash scripts/install-java.sh   # CI 环境，跳过交互
 # ============================================================
 set -euo pipefail
 
-JAVA_VERSION="${JAVA_VERSION:-25}"
+JAVA_VERSION="${JAVA_VERSION:-21}"
 MAVEN_VERSION="${MAVEN_VERSION:-3.9.9}"
 
 echo "══════════════════════════════════════════════"
@@ -35,7 +45,8 @@ install_java() {
 
     # 检查是否已安装
     if command -v java &>/dev/null; then
-        CURRENT=$(java -version 2>&1 | head -1 | grep -oP '\d+' | head -1 || true)
+        # 兼容 GNU/macOS 的版本提取：用 awk 替代 grep -P
+        CURRENT=$(java -version 2>&1 | head -1 | awk '{match($0, /[0-9]+/); print substr($0, RSTART, RLENGTH)}' || true)
         if [[ "$CURRENT" == "$JAVA_VERSION" ]]; then
             echo "✅ Java ${JAVA_VERSION} is already installed"
             java -version 2>&1 | head -3
@@ -46,7 +57,6 @@ install_java() {
     # 方法 1: 通过 Adoptium APT 仓库 (推荐，可自动更新)
     echo "[1/2] 📥 Adding Adoptium APT repository..."
 
-    # 安装依赖
     sudo apt-get update -qq
     sudo apt-get install -y -qq wget apt-transport-https gpg 2>/dev/null
 
@@ -106,7 +116,6 @@ install_maven() {
     sudo ln -sf "${MAVEN_INSTALL_DIR}/apache-maven-${MAVEN_VERSION}/bin/mvn" /usr/local/bin/mvn
 
     echo "[3/3] ⚙️  Configuring Maven environment..."
-    # 在 profile 中添加 MAVEN_HOME
     for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
         if [[ -f "$rc" ]]; then
             if ! grep -q 'MAVEN_HOME' "$rc" 2>/dev/null; then
@@ -131,6 +140,11 @@ install_maven() {
 
 install_gradle() {
     echo ""
+    # CI/非交互环境下跳过 Gradle 安装
+    if [[ "${NONINTERACTIVE:-0}" == "1" ]]; then
+        echo "   Skipping Gradle (non-interactive mode)"
+        return
+    fi
     read -rp "── Install Gradle as well? (y/N): " reply
     if [[ ! "$reply" =~ ^[Yy]$ ]]; then
         echo "   Skipping Gradle"

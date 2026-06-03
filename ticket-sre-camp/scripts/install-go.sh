@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
 # ============================================================
 # install-go.sh — 在 Ubuntu 上安装 Go 开发环境
+#
+# 用途：下载并安装指定版本的 Go 工具链到 /usr/local/go
+#       自动配置 GOROOT/GOPATH/PATH 环境变量到 shell rc 文件
+#
 # 适用：Ubuntu 20.04 / 22.04 / 24.04
 # 网络：海外直连，无需代理
+#
+# 用法：
+#   bash scripts/install-go.sh                  # 安装默认版本
+#   GO_VERSION=1.22.0 bash scripts/install-go.sh # 安装指定版本
 # ============================================================
 set -euo pipefail
 
-GO_VERSION="${GO_VERSION:-1.25.1}"
+GO_VERSION="${GO_VERSION:-1.22.0}"
 GO_OS="linux"
 GO_ARCH="amd64"
 GO_TAR="go${GO_VERSION}.${GO_OS}-${GO_ARCH}.tar.gz"
@@ -19,7 +27,8 @@ echo "════════════════════════�
 
 # ── 检查是否已安装相同版本 ──────────────────────
 if command -v go &>/dev/null; then
-    CURRENT=$(go version | grep -oP 'go\K[0-9.]+' || true)
+    # 兼容 GNU/macOS 的版本提取：优先用 awk，不用 grep -P
+    CURRENT=$(go version 2>/dev/null | awk '{match($3, /[0-9.]+/); print substr($3, RSTART, RLENGTH)}' || true)
     if [[ "$CURRENT" == "$GO_VERSION" ]]; then
         echo "✅ Go ${GO_VERSION} is already installed"
         go version
@@ -42,10 +51,16 @@ echo "  ✅ Download complete ($(du -h "$GO_TAR" | cut -f1))"
 # ── 校验 SHA256 ────────────────────────────────
 echo ""
 echo "[2/3] 🔐 Verifying checksum..."
-# Go 官方提供 sha256 文件，下载并校验
 curl -fsSL "${GO_URL}.sha256" -o "${GO_TAR}.sha256"
 cd /tmp
-sha256sum -c "${GO_TAR}.sha256"
+# 兼容 GNU sha256sum 和 macOS shasum -a 256
+if command -v sha256sum &>/dev/null; then
+    sha256sum -c "${GO_TAR}.sha256"
+elif command -v shasum &>/dev/null; then
+    shasum -a 256 -c "${GO_TAR}.sha256"
+else
+    echo "⚠️  No sha256sum/shasum found, skipping checksum verification"
+fi
 rm -f "${GO_TAR}.sha256"
 echo "  ✅ Checksum verified"
 
@@ -53,7 +68,6 @@ echo "  ✅ Checksum verified"
 echo ""
 echo "[3/3] 📦 Installing to ${INSTALL_DIR}/go..."
 
-# 如果已存在旧版本，先删除
 if [[ -d "${INSTALL_DIR}/go" ]]; then
     echo "  Removing existing installation..."
     sudo rm -rf "${INSTALL_DIR}/go"
@@ -63,16 +77,20 @@ sudo tar -C "${INSTALL_DIR}" -xzf "/tmp/${GO_TAR}"
 rm -f "/tmp/${GO_TAR}"
 
 # ── 配置环境变量 ────────────────────────────────
+
 configure_shell() {
     local profile="$1"
-    local go_path_added=false
 
     if [[ -f "$profile" ]]; then
-        # 检查是否已配置
         if grep -q '/usr/local/go/bin' "$profile" 2>/dev/null; then
             echo "  Already configured in $profile"
             return
         fi
+    fi
+
+    # 如果文件不存在，创建它
+    if [[ ! -f "$profile" ]]; then
+        return
     fi
 
     echo "" >> "$profile"
@@ -86,9 +104,8 @@ configure_shell() {
 echo ""
 echo "⚙️  Configuring environment variables..."
 
-# 根据常用 shell 配置
 for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
-    if [[ -f "$rc" ]] || [[ "$rc" == "$HOME/.bashrc" ]]; then
+    if [[ -f "$rc" ]]; then
         configure_shell "$rc"
     fi
 done

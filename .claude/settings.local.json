@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Recurse -Depth 3 -Name)",
+      "Bash(Select-Object -First 80)"
+    ]
+  }
+}

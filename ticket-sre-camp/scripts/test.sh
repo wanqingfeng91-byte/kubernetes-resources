@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 # ============================================================
 # test.sh — 端到端集成测试脚本
+#
+# 用途：在 Kubernetes 集群内对已部署的微服务执行集成测试
+#       测试覆盖：API 端点、数据库读写分离、Job 状态、
+#       CronJob 配置、探针端点、PVC 持久化
+#
+# 前置条件：已通过 deploy.sh 部署所有资源到集群
+#
+# 用法：
+#   bash scripts/test.sh
 # ============================================================
 set -euo pipefail
 
@@ -14,7 +23,7 @@ check() {
     local desc="$1" url="$2" expect="$3"
     printf "  %-50s " "${desc}..."
     local resp
-    resp=$(kubectl run "test-$$-${RANDOM}" -n "$NAMESPACE" --rm -i --restart=Never --image=alpine/curl:latest -- \
+    resp=$(kubectl run "test-$$-${RANDOM}" -n "$NAMESPACE" --rm -i --restart=Never --image=curlimages/curl:latest -- \
         curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$url" 2>/dev/null) || resp="000"
     if [[ "$resp" == "$expect" ]]; then
         green "HTTP ${resp}"
@@ -57,14 +66,14 @@ check "db-0 node info" \
 # 测试主库写入
 echo "  Testing master write..."
 kubectl run "test-write-$$-${RANDOM}" -n "$NAMESPACE" --rm -i --restart=Never \
-    --image=alpine/curl:latest -- \
+    --image=curlimages/curl:latest -- \
     curl -s -X POST http://ticket-db-0.ticket-db-svc:8081/order/write 2>/dev/null | grep -q '"status":"success"' \
     && green "Master write OK" || red "Master write failed"
 
 # 测试从库只读
 echo "  Testing slave read..."
 kubectl run "test-read-$$-${RANDOM}" -n "$NAMESPACE" --rm -i --restart=Never \
-    --image=alpine/curl:latest -- \
+    --image=curlimages/curl:latest -- \
     curl -s http://ticket-db-1.ticket-db-svc:8081/order/read 2>/dev/null | grep -q '"status":"success"' \
     && green "Slave read OK" || red "Slave read failed"
 
@@ -99,7 +108,7 @@ echo "── 5. Probe Verification ──"
 # 验证 startupProbe
 echo "  Checking startupProbe endpoint..."
 resp=$(kubectl run "test-startup-$$-${RANDOM}" -n "$NAMESPACE" --rm -i --restart=Never \
-    --image=alpine/curl:latest -- \
+    --image=curlimages/curl:latest -- \
     curl -s http://ticket-api-svc/startup 2>/dev/null || echo "FAIL")
 if [[ "$resp" == "startup complete" ]]; then
     green "startupProbe: Pod has completed initialization"

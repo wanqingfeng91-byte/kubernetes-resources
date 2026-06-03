@@ -1,8 +1,20 @@
 #!/usr/bin/env bash
 # ============================================================
 # install-k8s-tools.sh — 在 Ubuntu 上安装 Docker + kubectl + 辅助工具
+#
+# 用途：一键安装 Kubernetes 开发运维工具链
+#       - Docker Engine + Docker Compose
+#       - kubectl（Kubernetes 命令行工具）
+#       - Helm（K8s 包管理器）
+#       - KinD（本地 K8s 集群，基于 Docker）
+#       - k9s（可选，终端 K8s 看板，交互式确认）
+#
 # 适用：Ubuntu 20.04 / 22.04 / 24.04
 # 网络：海外直连，无需代理
+#
+# 用法：
+#   bash scripts/install-k8s-tools.sh                  # 安装全部（含交互确认）
+#   NONINTERACTIVE=1 bash scripts/install-k8s-tools.sh  # CI 环境，跳过交互
 # ============================================================
 set -euo pipefail
 
@@ -76,12 +88,11 @@ install_kubectl() {
 
     if command -v kubectl &>/dev/null; then
         echo "✅ kubectl already installed:"
-        kubectl version --client --short 2>/dev/null || kubectl version --client 2>/dev/null | head -1
+        kubectl version --client 2>/dev/null | head -1 || kubectl version --client --short 2>/dev/null | head -1
         return
     fi
 
     echo "[1/2] 📥 Downloading kubectl (${KUBECTL_VERSION})..."
-    # 使用 Google 官方源（海外直连）
     if [[ "$KUBECTL_VERSION" == "stable" ]]; then
         curl -fsSLO "https://dl.k8s.io/release/stable/bin/linux/${K8S_ARCH}/kubectl"
     else
@@ -106,7 +117,7 @@ install_kubectl() {
 
     echo ""
     echo "✅ kubectl installed:"
-    kubectl version --client --short 2>/dev/null || kubectl version --client 2>/dev/null | head -1
+    kubectl version --client 2>/dev/null | head -1 || kubectl version --client --short 2>/dev/null | head -1
 }
 
 # ═══════════════════════════════════════════════
@@ -157,6 +168,11 @@ install_kind() {
 
 install_k9s() {
     echo ""
+    # CI/非交互环境下跳过 k9s 安装
+    if [[ "${NONINTERACTIVE:-0}" == "1" ]]; then
+        echo "   Skipping k9s (non-interactive mode)"
+        return
+    fi
     read -rp "── Install k9s (terminal K8s dashboard)? (y/N): " reply
     if [[ ! "$reply" =~ ^[Yy]$ ]]; then
         echo "   Skipping k9s"
@@ -186,7 +202,7 @@ echo "✅ K8s toolchain installation complete!"
 echo ""
 echo "   Installed versions:"
 docker --version     || echo "   ⚠️  docker: not found"
-kubectl version --client --short 2>/dev/null || kubectl version --client 2>/dev/null | head -1
+kubectl version --client 2>/dev/null | head -1 || echo "   ⚠️  kubectl: not found"
 helm version --short 2>/dev/null || echo "   ⚠️  helm: not found"
 kind version 2>/dev/null | head -1 || echo "   ⚠️  kind: not found"
 echo ""
