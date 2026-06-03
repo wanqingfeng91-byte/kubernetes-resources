@@ -1,10 +1,10 @@
 # ============================================================
 # Stage 1: Build Go binary
 # ============================================================
-FROM golang:1.25-alpine AS builder
+FROM golang:1.22-alpine AS builder
 
 WORKDIR /build
-COPY go.mod go.sum ./
+COPY go.mod go.sum* ./
 RUN go mod download 2>/dev/null || true
 COPY main.go .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /ticket-db .
@@ -12,7 +12,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /ticket-d
 # ============================================================
 # Stage 2: 最小运行时镜像
 # ============================================================
-FROM alpine:3.21
+FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates tzdata && \
     cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \

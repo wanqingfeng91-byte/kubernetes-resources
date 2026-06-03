@@ -1,12 +1,12 @@
 # ============================================================
 # Stage 1: Build Go binary
 # ============================================================
-FROM golang:1.25-alpine AS builder
+FROM golang:1.22-alpine AS builder
 
 WORKDIR /build
 
-# 先复制依赖文件，利用 Docker 缓存层
-COPY go.mod go.sum ./
+# 复制依赖文件，利用 Docker 缓存层（go.sum 可选，首次构建可能不存在）
+COPY go.mod go.sum* ./
 RUN go mod download 2>/dev/null || true
 
 # 复制源码并编译
@@ -16,7 +16,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /ticket-a
 # ============================================================
 # Stage 2: 最小运行时镜像
 # ============================================================
-FROM alpine:3.21
+FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates tzdata && \
     cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \

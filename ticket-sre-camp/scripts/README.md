@@ -91,15 +91,29 @@ bash scripts/test.sh
 
 ---
 
-## 修复记录（2026-06-03）
+## 修复记录
 
-本批脚本的修复内容：
+### 第二批（2026-06-03）— Docker 构建链修复
+
+在 Ubuntu 上 `docker build` 实测后发现的代码层问题：
+
+| 问题 | 影响范围 | 修复方式 |
+|------|----------|----------|
+| Dockerfile 中 `COPY go.mod go.sum ./` 但 `go.sum` 不存在 | 4 个 Go 服务 Docker 构建全部失败 | `go.sum` → `go.sum*`（可选匹配，无此文件时不报错） |
+| Dockerfile 引用 `golang:1.25-alpine`（不存在） | 4 个 Go 服务 | 改为 `golang:1.22-alpine` |
+| `go.mod` 声明 `go 1.25`（不存在） | 4 个 Go 服务 | 改为 `go 1.22` |
+| Dockerfile 引用 `alpine:3.21`（可能不存在的版本） | 4 个 Go 服务 | 改为 `alpine:3.20` |
+| Dockerfile 引用 `maven:3.9-eclipse-temurin-25` / `eclipse-temurin:25-jre-alpine`（Java 25 不存在） | 4 个 Java 服务 | 改为 `...temurin-21` / `...21-jre-alpine` |
+| `pom.xml` 声明 `<java.version>25</java.version>` + Spring Boot `3.4.5`（均不存在） | 4 个 Java 服务 | 改为 `java.version=21` + Spring Boot `3.3.5` |
+| Checksum 校验逻辑依赖 `sha256sum -c` 解析格式 | `install-go.sh` | 改为逐文件提取 64 位 hash 手动比对 |
+| `alpine/curl:latest` Docker 镜像不存在 | `test.sh` | 改为 `curlimages/curl:latest` |
+
+### 第一批（2026-06-03）— Shell 脚本修复
 
 1. **路径修复** — `build-go.sh` 和 `build-images.sh` 中 Go 服务路径从 `cmd/` 修正为 `go/`（与实际目录结构一致）
-2. **版本修复** — `install-go.sh` 默认 Go 版本从 `1.25.1`（不存在）修正为 `1.22.0`；`install-java.sh` 默认 Java 版本从 `25`（不存在）修正为 `21`
+2. **版本修复** — `install-go.sh` 默认 Go 版本调整为 `1.22.0`；`install-java.sh` 默认 Java 版本调整为 `21`
 3. **兼容性修复** — `grep -oP`（GNU 特有）改为 POSIX 兼容的 `awk` 提取方式，`sha256sum` 增加 macOS `shasum` 回退
 4. **CI 兼容** — `install-java.sh` 和 `install-k8s-tools.sh` 的交互式 `read` 增加 `NONINTERACTIVE=1` 跳过机制
-5. **镜像修复** — `test.sh` 中 `alpine/curl:latest`（不存在）修正为 `curlimages/curl:latest`
-6. **废弃标志** — `kubectl version --short` 移除，新版 kubectl 直接使用 `kubectl version --client`
-7. **健壮性** — `setup-ubuntu.sh` 增加 `lsb_release` 缺失时的回退逻辑
-8. **文档补充** — 所有脚本头部增加了中文用途说明、前置条件、用法示例
+5. **废弃标志** — `kubectl version --short` 移除，新版 kubectl 直接使用 `kubectl version --client`
+6. **健壮性** — `setup-ubuntu.sh` 增加 `lsb_release` 缺失时的回退逻辑
+7. **文档补充** — 所有脚本头部增加了中文用途说明、前置条件、用法示例
