@@ -51,18 +51,41 @@ echo "  ✅ Download complete ($(du -h "$GO_TAR" | cut -f1))"
 # ── 校验 SHA256 ────────────────────────────────
 echo ""
 echo "[2/3] 🔐 Verifying checksum..."
-curl -fsSL "${GO_URL}.sha256" -o "${GO_TAR}.sha256"
-cd /tmp
-# 兼容 GNU sha256sum 和 macOS shasum -a 256
+
+# 选择可用的 SHA256 工具
 if command -v sha256sum &>/dev/null; then
-    sha256sum -c "${GO_TAR}.sha256"
+    SHA256_CMD="sha256sum"
 elif command -v shasum &>/dev/null; then
-    shasum -a 256 -c "${GO_TAR}.sha256"
+    SHA256_CMD="shasum -a 256"
 else
-    echo "⚠️  No sha256sum/shasum found, skipping checksum verification"
+    SHA256_CMD=""
 fi
-rm -f "${GO_TAR}.sha256"
-echo "  ✅ Checksum verified"
+
+if [[ -z "$SHA256_CMD" ]]; then
+    echo "⚠️  No sha256sum/shasum found, skipping checksum verification"
+else
+    # 下载官方校验文件（可能包含裸 hash 或 HTML 重定向）
+    curl -fsSL "${GO_URL}.sha256" -o "${GO_TAR}.sha256"
+
+    # 从下载的文件中提取 64 位十六进制哈希值
+    EXPECTED_HASH=$(grep -oE '[0-9a-fA-F]{64}' "${GO_TAR}.sha256" | head -1 || true)
+    rm -f "${GO_TAR}.sha256"
+
+    if [[ -z "$EXPECTED_HASH" ]]; then
+        echo "⚠️  Could not extract checksum from remote, skipping verification"
+    else
+        ACTUAL_HASH=$($SHA256_CMD "$GO_TAR" | awk '{print $1}')
+        if [[ "$EXPECTED_HASH" == "$ACTUAL_HASH" ]]; then
+            echo "  ✅ Checksum verified"
+        else
+            echo "  ❌ Checksum mismatch!"
+            echo "     Expected: ${EXPECTED_HASH}"
+            echo "     Got:      ${ACTUAL_HASH}"
+            rm -f "$GO_TAR"
+            exit 1
+        fi
+    fi
+fi
 
 # ── 安装 ────────────────────────────────────────
 echo ""
