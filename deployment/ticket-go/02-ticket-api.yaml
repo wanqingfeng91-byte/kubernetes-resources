@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: ticket-api
+  name: ticket-api
+  namespace: ticket
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ticket-api
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: ticket-api
+    spec:
+      containers:
+      - image: jasonops/ticket:ticket-api-go-latest
+        name: ticket
+        # 镜像下载策略
+        imagePullPolicy: Always
+        resources: {}
+        # 存活探针
+        startupProbe:
+          httpGet:
+            #host: 127.0.0.1
+            path: /startup
+            port: 8080
+            scheme: HTTP
+          # 通用字段
+          # 初始化延迟时间
+          initialDelaySeconds: 30
+          # 探针探测周期
+          periodSeconds: 3
+          # 超时时间
+          timeoutSeconds: 1
+          # 错误次数
+          failureThreshold: 3
